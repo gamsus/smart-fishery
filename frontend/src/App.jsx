@@ -52,7 +52,6 @@ export default function App() {
   const [newSensorSeriesId, setNewSensorSeriesId] = useState('');
   const [createdApiKey, setCreatedApiKey] = useState(null);
 
-  // Pobranie serii
   const loadSeries = () => {
     fetch(`${API_BASE}/series`)
       .then(res => res.json())
@@ -68,7 +67,6 @@ export default function App() {
       .catch(console.error);
   };
 
-  // Pobranie czujników (gdy admin zalogowany)
   const loadSensors = (authToken) => {
     if (!authToken) return;
     fetch(`${API_BASE}/sensors`, {
@@ -87,7 +85,6 @@ export default function App() {
     if (token) loadSensors(token);
   }, [token]);
 
-  // Pobranie pomiarów
   const fetchMeasurements = () => {
     let url = `${API_BASE}/measurements?limit=1000`;
     if (activeSeriesIds.length > 0) {
@@ -110,7 +107,6 @@ export default function App() {
     }
   }, [activeSeriesIds, dateFrom, dateTo, series]);
 
-  // Logowanie
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
@@ -147,7 +143,6 @@ export default function App() {
     setSensors([]);
   };
 
-  // Dodanie nowej serii
   const handleAddSeries = async (e) => {
     e.preventDefault();
     const res = await fetch(`${API_BASE}/series`, {
@@ -175,7 +170,6 @@ export default function App() {
     }
   };
 
-  // Rejestracja czujnika
   const handleAddSensor = async (e) => {
     e.preventDefault();
     const res = await fetch(`${API_BASE}/sensors`, {
@@ -205,8 +199,6 @@ export default function App() {
     );
   };
 
-  // Wykres z podziałem na osie Y (F2):
-  // Ciśnienie (hPa) -> prawa oś 'y1', pozostałe (temperatura, tlen) -> lewa oś 'y'
   const chartData = useMemo(() => {
     const datasets = series
       .filter(s => activeSeriesIds.includes(s.id))
@@ -268,7 +260,6 @@ export default function App() {
     }
   };
 
-  // Tabela wyników (wspólna oś czasu)
   const tableRows = useMemo(() => {
     const map = new Map();
     measurements.forEach(m => {
@@ -288,7 +279,7 @@ export default function App() {
       <header>
         <div>
           <h1>Smart Fishery – Monitoring Łowiska</h1>
-          <p style={{ margin: 0, color: '#64748b' }}>System pomiarów parametrów wody i otoczenia</p>
+          <p style={{ margin: 0, color: '#475569' }}>System pomiarów parametrów wody i otoczenia</p>
         </div>
         <div className="no-print">
           <button onClick={() => window.print()} className="secondary" style={{ marginRight: '0.5rem' }}>
@@ -301,9 +292,11 @@ export default function App() {
       </header>
 
       {/* Filtry i sterowanie (F5) */}
-      <section className="controls-card no-print">
-        <div className="control-group">
-          <label>Wybór serii:</label>
+      <section className="controls-card no-print" aria-label="Filtry i opcje wyświetlania">
+        <fieldset style={{ border: 'none', padding: 0, margin: 0 }} className="control-group">
+          <legend style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', marginBottom: '0.4rem' }}>
+            Wybór serii:
+          </legend>
           <div className="series-toggles">
             {series.map(s => (
               <label key={s.id} className="toggle-label">
@@ -311,12 +304,13 @@ export default function App() {
                   type="checkbox"
                   checked={activeSeriesIds.includes(s.id)}
                   onChange={() => toggleSeries(s.id)}
+                  aria-label={`Wyświetl serię: ${s.name}`}
                 />
-                <span style={{ color: s.color, fontWeight: 600 }}>{s.name}</span>
+                <span style={{ color: s.color, fontWeight: 700 }}>{s.name}</span>
               </label>
             ))}
           </div>
-        </div>
+        </fieldset>
 
         <div className="control-group">
           <label htmlFor="from-date">Od:</label>
@@ -325,6 +319,7 @@ export default function App() {
             type="datetime-local"
             value={dateFrom}
             onChange={e => setDateFrom(e.target.value)}
+            aria-label="Data początkowa zakresu pomiarów"
           />
         </div>
 
@@ -335,11 +330,13 @@ export default function App() {
             type="datetime-local"
             value={dateTo}
             onChange={e => setDateTo(e.target.value)}
+            aria-label="Data końcowa zakresu pomiarów"
           />
         </div>
 
         {(dateFrom || dateTo) && (
           <button
+            type="button"
             className="secondary"
             onClick={() => { setDateFrom(''); setDateTo(''); }}
           >
@@ -348,25 +345,33 @@ export default function App() {
         )}
       </section>
 
-      {/* Wykres (F1, F2 - czytelne porównanie z osobnymi osiami Y) */}
-      <section className="chart-card">
-        <Line data={chartData} options={chartOptions} />
+      {/* Wykres (F1, F2) */}
+      <section className="chart-card" aria-label="Wykres pomiarów w czasie">
+        <Line 
+          data={chartData} 
+          options={chartOptions} 
+          role="img" 
+          aria-label="Interaktywny wykres liniowy parametrów wody i otoczenia łowiska" 
+        />
       </section>
 
       {/* Tabela wyników (F1, F6) */}
-      <section className="table-card">
+      <section className="table-card" aria-label="Tabela wyników pomiarowych">
         <h3>Tabela pomiarów (wspólna oś czasu)</h3>
-        <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: 0 }}>
+        <p style={{ fontSize: '0.85rem', color: '#475569', marginTop: 0 }}>
           Kliknij wiersz w tabeli, aby wyróżnić punkt pomiarowy na wykresie.
         </p>
         <table>
+          <caption style={{ textAlign: 'left', captionSide: 'bottom', fontSize: '0.8rem', color: '#475569', marginTop: '0.5rem' }}>
+            Zestawienie ostatnich pomiarów uszeregowanych chronologicznie.
+          </caption>
           <thead>
             <tr>
-              <th>Data i czas</th>
+              <th scope="col">Data i czas</th>
               {series
                 .filter(s => activeSeriesIds.includes(s.id))
                 .map(s => (
-                  <th key={s.id}>
+                  <th key={s.id} scope="col">
                     {s.name} [{s.unit || '-'}]
                   </th>
                 ))}
@@ -387,6 +392,14 @@ export default function App() {
                     key={row.timestamp}
                     className={isSelected ? 'selected-row' : ''}
                     onClick={() => setSelectedTimestamp(isSelected ? null : row.timestamp)}
+                    tabIndex={0}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        setSelectedTimestamp(isSelected ? null : row.timestamp);
+                      }
+                    }}
+                    role="button"
+                    aria-label={`Pomiar z dnia ${new Date(row.timestamp).toLocaleString()}`}
                     title="Kliknij, aby podświetlić na wykresie"
                   >
                     <td>{new Date(row.timestamp).toLocaleString()}</td>
@@ -406,7 +419,7 @@ export default function App() {
       </section>
 
       {/* Panel administratora (F3, F8, F12) */}
-      <section className="admin-panel no-print">
+      <section className="admin-panel no-print" aria-label="Zarządzanie systemem">
         {token ? (
           <div>
             <h3>Panel Administratora Łowiska</h3>
@@ -415,45 +428,66 @@ export default function App() {
               {/* Formularz nowej serii (F3) */}
               <form onSubmit={handleAddSeries} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                 <h4 style={{ margin: 0 }}>Dodaj nową serię pomiarową</h4>
+                <label htmlFor="series-name" style={{ fontSize: '0.8rem' }}>Nazwa serii:</label>
                 <input
+                  id="series-name"
                   type="text"
-                  placeholder="Nazwa serii (np. Przejrzystość wody)"
+                  placeholder="np. Przejrzystość wody"
                   value={newSeriesName}
                   onChange={e => setNewSeriesName(e.target.value)}
                   required
                 />
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="Wartość min"
-                    value={newSeriesMin}
-                    onChange={e => setNewSeriesMin(e.target.value)}
-                    required
-                  />
-                  <input
-                    type="number"
-                    step="any"
-                    placeholder="Wartość max"
-                    value={newSeriesMax}
-                    onChange={e => setNewSeriesMax(e.target.value)}
-                    required
-                  />
+                  <div style={{ flex: 1 }}>
+                    <label htmlFor="series-min" style={{ fontSize: '0.8rem' }}>Min:</label>
+                    <input
+                      id="series-min"
+                      type="number"
+                      step="any"
+                      placeholder="Min"
+                      value={newSeriesMin}
+                      onChange={e => setNewSeriesMin(e.target.value)}
+                      required
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label htmlFor="series-max" style={{ fontSize: '0.8rem' }}>Max:</label>
+                    <input
+                      id="series-max"
+                      type="number"
+                      step="any"
+                      placeholder="Max"
+                      value={newSeriesMax}
+                      onChange={e => setNewSeriesMax(e.target.value)}
+                      required
+                      style={{ width: '100%' }}
+                    />
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                  <input
-                    type="text"
-                    placeholder="Jednostka (np. m, pH, %)"
-                    value={newSeriesUnit}
-                    onChange={e => setNewSeriesUnit(e.target.value)}
-                  />
-                  <input
-                    type="color"
-                    value={newSeriesColor}
-                    onChange={e => setNewSeriesColor(e.target.value)}
-                    title="Wybierz kolor"
-                    style={{ height: '38px', width: '60px', padding: 0 }}
-                  />
+                  <div style={{ flex: 1 }}>
+                    <label htmlFor="series-unit" style={{ fontSize: '0.8rem' }}>Jednostka:</label>
+                    <input
+                      id="series-unit"
+                      type="text"
+                      placeholder="np. m, pH, %"
+                      value={newSeriesUnit}
+                      onChange={e => setNewSeriesUnit(e.target.value)}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="series-color" style={{ fontSize: '0.8rem' }}>Kolor:</label>
+                    <input
+                      id="series-color"
+                      type="color"
+                      value={newSeriesColor}
+                      onChange={e => setNewSeriesColor(e.target.value)}
+                      title="Wybierz kolor"
+                      style={{ height: '38px', width: '60px', padding: 0, display: 'block' }}
+                    />
+                  </div>
                 </div>
                 <button type="submit">Utwórz serię</button>
               </form>
@@ -461,21 +495,25 @@ export default function App() {
               {/* Formularz rejestracji nowego czujnika (F12) */}
               <form onSubmit={handleAddSensor} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                 <h4 style={{ margin: 0 }}>Zarejestruj czujnik IoT</h4>
+                <label htmlFor="sensor-name" style={{ fontSize: '0.8rem' }}>Nazwa czujnika:</label>
                 <input
+                  id="sensor-name"
                   type="text"
-                  placeholder="Nazwa czujnika (np. Boja pomiarowa #1)"
+                  placeholder="np. Boja pomiarowa #1"
                   value={newSensorName}
                   onChange={e => setNewSensorName(e.target.value)}
                   required
                 />
+                <label htmlFor="sensor-series" style={{ fontSize: '0.8rem' }}>Przypisz do serii:</label>
                 <select
+                  id="sensor-series"
                   value={newSensorSeriesId}
                   onChange={e => setNewSensorSeriesId(e.target.value)}
                   style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)' }}
                 >
                   {series.map(s => (
                     <option key={s.id} value={s.id}>
-                      Przypisz do: {s.name} ({s.unit})
+                      {s.name} ({s.unit})
                     </option>
                   ))}
                 </select>
@@ -505,16 +543,20 @@ export default function App() {
         ) : (
           <div>
             <h3>Logowanie Administratora</h3>
-            <p style={{ fontSize: '0.85rem', color: '#64748b' }}>Zaloguj się kontem testowym, aby zarządzać seriami i rejestrować czujniki.</p>
+            <p style={{ fontSize: '0.85rem', color: '#475569' }}>Zaloguj się kontem testowym, aby zarządzać seriami i rejestrować czujniki.</p>
             <form onSubmit={handleLogin} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <label htmlFor="login-username" style={{ fontSize: '0.8rem' }}>Login:</label>
               <input
+                id="login-username"
                 type="text"
                 placeholder="Login"
                 value={username}
                 onChange={e => setUsername(e.target.value)}
                 required
               />
+              <label htmlFor="login-password" style={{ fontSize: '0.8rem' }}>Hasło:</label>
               <input
+                id="login-password"
                 type="password"
                 placeholder="Hasło"
                 value={password}
