@@ -12,9 +12,41 @@ const PORT = process.env.PORT || 3000;
 export const JWT_SECRET = process.env.JWT_SECRET || 'super-sekretny-klucz-jwt-zai-2026';
 
 app.use(cors());
-app.use(express.json());
 
-// 1. Weryfikacja nagłówka Accept (kod 406)
+// 1. Obsługa 415 Unsupported Media Type przy nieobsługiwanym Content-Type dla żądań z ciałem
+app.use((req, res, next) => {
+  const hasBody = ['POST', 'PUT', 'PATCH'].includes(req.method) && 
+                  req.headers['content-length'] && 
+                  req.headers['content-length'] !== '0';
+
+  if (hasBody) {
+    const ct = req.headers['content-type'];
+    if (ct && !ct.includes('application/json')) {
+      return sendProblem(res, 415, 'Unsupported Media Type', 'Oczekiwano Content-Type: application/json');
+    }
+  }
+  next();
+});
+
+// Parsowanie JSON z wyłapaniem błędu składni (zwraca 400 Bad Request w RFC 9457)
+app.use(express.json({
+  verify: (req, res, buf) => {
+    try {
+      if (buf.length) JSON.parse(buf.toString());
+    } catch {
+      sendProblem(res, 400, 'Bad Request', 'Niepoprawny format JSON');
+      throw new Error('Invalid JSON');
+    }
+  }
+}));
+
+// Obsługa błędów parsowania
+app.use((err, req, res, next) => {
+  if (err.message === 'Invalid JSON') return;
+  next(err);
+});
+
+// 2. Weryfikacja nagłówka Accept (kod 406)
 app.use((req, res, next) => {
   if (req.headers.accept && !req.accepts(['application/json', 'json', '*/*'])) {
     return res.status(406).end();
@@ -22,12 +54,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// 2. Health check
+// 3. Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// 3. Logowanie administratora
+// 4. Logowanie administratora
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
@@ -49,12 +81,18 @@ app.post('/api/auth/login', (req, res) => {
   });
 });
 
-// 4. Wylogowanie administratora
+// 5. Wylogowanie administratora (unieważnienie tokenu)
 app.post('/api/auth/logout', requireAdmin, (req, res) => {
+  try {
+    db.prepare('INSERT OR IGNORE INTO revoked_tokens (token, revoked_at) VALUES (?, ?)')
+      .run(req.rawToken, new Date().toISOString());
+  } catch (e) {
+    // ignoruj błąd duplikatu
+  }
   return res.status(204).end();
 });
 
-// 5. Zmiana hasła administratora
+// 6. Zmiana hasła administratora
 app.put('/api/auth/password', requireAdmin, (req, res) => {
   const { currentPassword, newPassword } = req.body || {};
   if (!currentPassword || !newPassword) {
@@ -87,13 +125,13 @@ function formatSeries(row) {
   };
 }
 
-// 6. Lista serii
+// 7. Lista serii
 app.get('/api/series', (req, res) => {
   const rows = db.prepare('SELECT * FROM series ORDER BY id ASC').all();
   res.json(rows.map(formatSeries));
 });
 
-// 7. Tworzenie serii
+// 8. Tworzenie serii
 app.post('/api/series', requireAdmin, (req, res) => {
   const { name, minValue, maxValue, color, icon, unit } = req.body || {};
 
@@ -122,7 +160,7 @@ app.post('/api/series', requireAdmin, (req, res) => {
   return res.status(201).json(formatSeries(created));
 });
 
-// 8. Odczyt serii
+// 9. Odczyt pojedynczej serii
 app.get('/api/series/:seriesId', (req, res) => {
   const row = db.prepare('SELECT * FROM series WHERE id = ?').get(req.params.seriesId);
   if (!row) {
@@ -131,7 +169,7 @@ app.get('/api/series/:seriesId', (req, res) => {
   return res.json(formatSeries(row));
 });
 
-// 9. Aktualizacja serii
+// 10. Aktualizacja serii
 app.put('/api/series/:seriesId', requireAdmin, (req, res) => {
   const seriesId = req.params.seriesId;
   const existing = db.prepare('SELECT * FROM series WHERE id = ?').get(seriesId);
@@ -175,7 +213,7 @@ app.put('/api/series/:seriesId', requireAdmin, (req, res) => {
   return res.json(formatSeries(updated));
 });
 
-// 10. Usunięcie serii
+// 11. Usunięcie serii (kaskadowo z czujnikami i pomiarami)
 app.delete('/api/series/:seriesId', requireAdmin, (req, res) => {
   const seriesId = req.params.seriesId;
   const existing = db.prepare('SELECT * FROM series WHERE id = ?').get(seriesId);
@@ -183,16 +221,16 @@ app.delete('/api/series/:seriesId', requireAdmin, (req, res) => {
     return sendProblem(res, 404, 'Not Found', 'Seria nie istnieje');
   }
 
+  // Usunięcie powiązanych czujników i pomiarów
+  db.prepare('DELETE FROM sensors WHERE series_id = ?').run(seriesId);
+  db.prepare('DELETE FROM measurements WHERE series_id = ?').run(seriesId);
   db.prepare('DELETE FROM series WHERE id = ?').run(seriesId);
+
   return res.status(204).end();
 });
 
-// ==========================================
-// OBSŁUGA CZUJNIKÓW (/api/sensors)
-// ==========================================
-
+// 12. Lista czujników
 function formatSensor(row) {
-  // Pobieramy czas ostatniego pomiaru dla danego czujnika
   const lastM = db.prepare(`
     SELECT timestamp FROM measurements 
     WHERE sensor_id = ? 
@@ -208,13 +246,12 @@ function formatSensor(row) {
   };
 }
 
-// 11. Lista czujników (admin)
 app.get('/api/sensors', requireAdmin, (req, res) => {
   const rows = db.prepare('SELECT * FROM sensors WHERE is_active = 1 ORDER BY id ASC').all();
   res.json(rows.map(formatSensor));
 });
 
-// 12. Rejestracja nowego czujnika (admin)
+// 13. Rejestracja czujnika
 app.post('/api/sensors', requireAdmin, (req, res) => {
   const { name, seriesId } = req.body || {};
   if (!name || seriesId === undefined) {
@@ -226,7 +263,6 @@ app.post('/api/sensors', requireAdmin, (req, res) => {
     return sendProblem(res, 422, 'Unprocessable Content', 'Wskazana seria nie istnieje');
   }
 
-  // Generujemy losowy klucz o długości 64 znaków hex (spełnia min. 32 znaki)
   const rawApiKey = crypto.randomBytes(32).toString('hex');
   const apiKeyHash = crypto.createHash('sha256').update(rawApiKey).digest('hex');
   const createdAt = new Date().toISOString();
@@ -245,7 +281,7 @@ app.post('/api/sensors', requireAdmin, (req, res) => {
   });
 });
 
-// 13. Odczyt czujnika (admin)
+// 14. Odczyt czujnika
 app.get('/api/sensors/:sensorId', requireAdmin, (req, res) => {
   const row = db.prepare('SELECT * FROM sensors WHERE id = ? AND is_active = 1').get(req.params.sensorId);
   if (!row) {
@@ -254,7 +290,7 @@ app.get('/api/sensors/:sensorId', requireAdmin, (req, res) => {
   return res.json(formatSensor(row));
 });
 
-// 14. Wyrejestrowanie czujnika (admin)
+// 15. Wyrejestrowanie czujnika
 app.delete('/api/sensors/:sensorId', requireAdmin, (req, res) => {
   const sensorId = req.params.sensorId;
   const existing = db.prepare('SELECT * FROM sensors WHERE id = ? AND is_active = 1').get(sensorId);
@@ -262,15 +298,11 @@ app.delete('/api/sensors/:sensorId', requireAdmin, (req, res) => {
     return sendProblem(res, 404, 'Not Found', 'Czujnik nie istnieje');
   }
 
-  // Deaktywacja czujnika: klucz natychmiast przestaje działać, pomiary zostają
   db.prepare('UPDATE sensors SET is_active = 0 WHERE id = ?').run(sensorId);
   return res.status(204).end();
 });
 
-// ==========================================
-// OBSŁUGA POMIARÓW (/api/measurements)
-// ==========================================
-
+// 16. Pobieranie pomiarów
 function formatMeasurement(row) {
   return {
     id: row.id,
@@ -281,9 +313,16 @@ function formatMeasurement(row) {
   };
 }
 
-// 15. Pobieranie pomiarów (publiczne z filtrowaniem)
 app.get('/api/measurements', (req, res) => {
   const { series, from, to, sort = 'timestamp', limit = 1000 } = req.query;
+
+  // Walidacja poprawności formatu parametrów daty from i to
+  if (from && isNaN(Date.parse(from))) {
+    return sendProblem(res, 400, 'Bad Request', 'Parametr "from" zawiera niepoprawną datę ISO 8601');
+  }
+  if (to && isNaN(Date.parse(to))) {
+    return sendProblem(res, 400, 'Bad Request', 'Parametr "to" zawiera niepoprawną datę ISO 8601');
+  }
 
   let query = 'SELECT * FROM measurements WHERE 1=1';
   const params = [];
@@ -314,7 +353,7 @@ app.get('/api/measurements', (req, res) => {
   return res.json(rows.map(formatMeasurement));
 });
 
-// 16. Przesłanie wyniku przez czujnik (POST z X-API-Key)
+// 17. Zapis pomiaru
 app.post('/api/measurements', (req, res) => {
   const apiKey = req.headers['x-api-key'];
   if (!apiKey) {
@@ -335,16 +374,15 @@ app.post('/api/measurements', (req, res) => {
 
   const targetSeries = db.prepare('SELECT * FROM series WHERE id = ?').get(sensor.series_id);
   if (!targetSeries) {
-    return sendProblem(res, 422, 'Unprocessable Content', 'Przypisana seria nie istnieje');
+    return sendProblem(res, 401, 'Unauthorized', 'Przypisana seria nie istnieje');
   }
 
-  // Walidacja zakresu min/max serii
   if (value < targetSeries.min_value || value > targetSeries.max_value) {
     return sendProblem(
       res,
       422,
       'Unprocessable Content',
-      `Wartość ${value} wykracza poza dopuszczalny przedział serii [${targetSeries.min_value}, ${targetSeries.max_value}]`
+      `Wartość ${value} wykracza poza zakres [${targetSeries.min_value}, ${targetSeries.max_value}]`
     );
   }
 
@@ -356,7 +394,6 @@ app.post('/api/measurements', (req, res) => {
     if (isNaN(parsedTime)) {
       return sendProblem(res, 400, 'Bad Request', 'Niepoprawny format daty ISO 8601');
     }
-    // Wymóg: znacznik czasu nie późniejszy niż 5 minut od bieżącego czasu serwera
     const maxAllowedFuture = Date.now() + 5 * 60 * 1000;
     if (parsedTime > maxAllowedFuture) {
       return sendProblem(res, 422, 'Unprocessable Content', 'Znacznik czasu wybiega w przyszłość o ponad 5 minut');
@@ -374,7 +411,7 @@ app.post('/api/measurements', (req, res) => {
   return res.status(201).json(formatMeasurement(created));
 });
 
-// 17. Odczyt pojedynczego pomiaru
+// 18. Odczyt pojedynczego pomiaru
 app.get('/api/measurements/:measurementId', (req, res) => {
   const row = db.prepare('SELECT * FROM measurements WHERE id = ?').get(req.params.measurementId);
   if (!row) {
@@ -383,7 +420,6 @@ app.get('/api/measurements/:measurementId', (req, res) => {
   return res.json(formatMeasurement(row));
 });
 
-// Blokada modyfikacji i usuwania wyników (wymóg kontraktu: PUT, PATCH, DELETE -> 405)
 app.all('/api/measurements/:measurementId', (req, res) => {
   if (['PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     return sendProblem(res, 405, 'Method Not Allowed', 'Wyniki pomiarów nie podlegają edycji ani usuwaniu');
