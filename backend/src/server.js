@@ -3,15 +3,30 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import db from './db.js';
 import { sendProblem } from './problem.js';
 import { requireAdmin } from './auth.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 export const JWT_SECRET = process.env.JWT_SECRET || 'super-sekretny-klucz-jwt-zai-2026';
 
 app.use(cors());
+
+// Nagłówki bezpieczeństwa wymagane w etapie E2 (A4)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://smart-fishery-api.onrender.com"
+  );
+  next();
+});
 
 // 1. Obsługa 415 Unsupported Media Type przy nieobsługiwanym Content-Type dla żądań z ciałem
 app.use((req, res, next) => {
@@ -28,7 +43,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Parsowanie JSON z wyłapaniem błędu składni (zwraca 400 Bad Request w RFC 9457)
+// Parsowanie JSON z wyłapaniem błędu składni (400 Bad Request w RFC 9457)
 app.use(express.json({
   verify: (req, res, buf) => {
     try {
@@ -46,8 +61,8 @@ app.use((err, req, res, next) => {
   next(err);
 });
 
-// 2. Weryfikacja nagłówka Accept (kod 406)
-app.use((req, res, next) => {
+// 2. Weryfikacja nagłówka Accept (kod 406 tylko dla endpointów API)
+app.use('/api', (req, res, next) => {
   if (req.headers.accept && !req.accepts(['application/json', 'json', '*/*'])) {
     return res.status(406).end();
   }
@@ -213,7 +228,7 @@ app.put('/api/series/:seriesId', requireAdmin, (req, res) => {
   return res.json(formatSeries(updated));
 });
 
-// 11. Usunięcie serii (kaskadowo z czujnikami i pomiarami)
+// 11. Usunięcie serii
 app.delete('/api/series/:seriesId', requireAdmin, (req, res) => {
   const seriesId = req.params.seriesId;
   const existing = db.prepare('SELECT * FROM series WHERE id = ?').get(seriesId);
@@ -221,7 +236,6 @@ app.delete('/api/series/:seriesId', requireAdmin, (req, res) => {
     return sendProblem(res, 404, 'Not Found', 'Seria nie istnieje');
   }
 
-  // Usunięcie powiązanych czujników i pomiarów
   db.prepare('DELETE FROM sensors WHERE series_id = ?').run(seriesId);
   db.prepare('DELETE FROM measurements WHERE series_id = ?').run(seriesId);
   db.prepare('DELETE FROM series WHERE id = ?').run(seriesId);
@@ -316,7 +330,6 @@ function formatMeasurement(row) {
 app.get('/api/measurements', (req, res) => {
   const { series, from, to, sort = 'timestamp', limit = 1000 } = req.query;
 
-  // Walidacja poprawności formatu parametrów daty from i to
   if (from && isNaN(Date.parse(from))) {
     return sendProblem(res, 400, 'Bad Request', 'Parametr "from" zawiera niepoprawną datę ISO 8601');
   }
@@ -424,6 +437,14 @@ app.all('/api/measurements/:measurementId', (req, res) => {
   if (['PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     return sendProblem(res, 405, 'Method Not Allowed', 'Wyniki pomiarów nie podlegają edycji ani usuwaniu');
   }
+});
+
+// 19. Serwowanie zbudowanego frontendu SPA
+const frontendDist = path.join(__dirname, '../../frontend/dist');
+app.use(express.static(frontendDist));
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(frontendDist, 'index.html'));
 });
 
 app.listen(PORT, () => {
