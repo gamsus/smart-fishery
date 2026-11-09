@@ -1,11 +1,21 @@
 import Database from 'better-sqlite3';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database(path.join(__dirname, '../data/fishery.db'));
+// Ścieżka do katalogu z danymi
+const dataDir = path.join(__dirname, '../data');
+
+// Automatyczne utworzenie folderu data, jeśli nie istnieje na serwerze
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+// Baza danych zostanie zapisana w pliku backend/data/fishery.db
+const db = new Database(path.join(dataDir, 'fishery.db'));
 db.pragma('foreign_keys = ON');
 
 db.exec(`
